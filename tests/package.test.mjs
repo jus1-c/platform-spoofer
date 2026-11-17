@@ -61,9 +61,11 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
         const manifest = JSON.parse(readFileSync(join(output, "plugin.json"), "utf8"));
 
         assert.equal(manifest.hash, createHash("md5").update(code).digest("hex"));
-        // Shelter shows this text, so it has to say what the build is and where it runs.
-        assert.match(manifest.description, /Shelter plugin for Dorion/);
-        assert.match(manifest.description, /not in Vencord/);
+        // Shelter shows this text, so it has to say what the build is and where it runs: the
+        // upstream plugin is already a Shelter plugin, so this one is the Dorion build of it.
+        assert.match(manifest.description, /Dorion/);
+        assert.match(manifest.description, /SpikeHD/);
+        assert.doesNotMatch(manifest.description, /Shelter port/i);
         // The upstream settings component lives in the source repository, not in the plugin.
         assert.doesNotMatch(code, /RadioGroup/);
         // The plugin only spoofs the reported platform; it does not touch requests.

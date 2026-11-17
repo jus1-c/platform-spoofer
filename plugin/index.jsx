@@ -1,5 +1,5 @@
 /*
- * Platform Spoof — Shelter port for Dorion.
+ * Platform Spoof — Dorion build of a Shelter plugin.
  * Copyright (c) 2026 SpikeHD and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *

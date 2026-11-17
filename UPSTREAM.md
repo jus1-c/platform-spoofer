@@ -9,6 +9,10 @@ Started from the upstream plugin, copied on 2026-11-17:
 
 The original file is not part of this repository; it can be read at the upstream commit above.
 
+The upstream plugin is already a Shelter plugin. This repository is the **Dorion build** of it: the
+changes below make it load and behave correctly in the web client Dorion hosts. They are not a port
+to Shelter, and nothing here is written for Vencord.
+
 ## What changed in the port
 
 | Upstream | Here |
