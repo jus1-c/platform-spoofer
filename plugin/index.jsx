@@ -9,7 +9,7 @@
  * of throwing, and undoes every hook when it is unloaded.
  */
 
-import { createSpoofer, normalizeClientType } from "./spoof.js";
+import { browserFor, createSpoofer, normalizeClientType } from "./spoof.js";
 
 const { store } = shelter.plugin;
 const { Select, SelectOption } = shelter.ui;
@@ -53,10 +53,10 @@ const spoofer = createSpoofer({
 });
 
 function statusText(current, type) {
+    // Configuration only: reading the patched function here would run Discord's getter on every
+    // render. Use PlatformSpoof.status() for the value the function actually returns.
     if (current.state === "active") {
-        // Show what the patched function returns, not what the plugin intended to return.
-        const browser = spoofer.getBrowser() ?? "unknown";
-        return `Patch installed: this client identifies as ${type} (browser: ${browser}).`;
+        return `Patch installed: this client identifies as ${type} (${browserFor(type)}).`;
     }
     if (current.state === "unsupported") return `Cannot spoof on this Discord build: ${current.reason}.`;
     if (current.state === "stopped") return "Spoofing is off.";
@@ -74,11 +74,19 @@ export function onLoad() {
         mobile: "Android",
         setSpoof: type => { store.clientType = normalizeClientType(type); setClientType(store.clientType); },
         // A debugging view of local state. It does not prove what another client sees.
-        status: () => ({
-            ...spoofer.getStatus(),
-            clientType: normalizeClientType(store.clientType),
-            browser: spoofer.getBrowser()
-        })
+        // `configured` is what the setting asks for; `reported` is what the patched function
+        // actually returned the last time Discord called it, and `provider` is what was patched.
+        status: () => {
+            const observed = spoofer.getObserved();
+            const clientType = normalizeClientType(store.clientType);
+            return {
+                ...spoofer.getStatus(),
+                clientType,
+                configured: browserFor(clientType),
+                reported: observed.browser,
+                provider: observed.provider
+            };
+        }
     };
     void spoofer.start();
 }

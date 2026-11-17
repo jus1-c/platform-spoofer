@@ -26,9 +26,14 @@ export function browserFor(clientType) {
     return BROWSERS[normalizeClientType(clientType)];
 }
 
-/** Only `browser` changes, so a locale, build number or device field survives untouched. */
+/**
+ * Only `browser` changes, so a locale, build number or device field survives untouched.
+ * An object without a browser string is not an identity object: adding the field would turn
+ * some unrelated value into a fake "success", so it is returned as it came in.
+ */
 export function rewritePlatform(properties, clientType) {
     if (!properties || typeof properties !== "object" || Array.isArray(properties)) return properties;
+    if (typeof properties.browser !== "string") return properties;
     const browser = browserFor(clientType);
     if (properties.browser === browser) return properties;
     return { ...properties, browser };
@@ -63,16 +68,43 @@ export function grabRequires(scope, name) {
     return found;
 }
 
-function providerIn(container, seen, depth) {
+/**
+ * Discord's message catalog answers every property name with a message function, and asking it
+ * for a property creates that property on the underlying object. So it has to be recognised
+ * without reading anything from it: its tag is enough, and it is also what keeps the locale
+ * warnings out of the console.
+ */
+const MESSAGE_CATALOG_TAG = "IntlMessagesProxy";
+
+function isMessageCatalog(container) {
+    try {
+        return container[Symbol.toStringTag] === MESSAGE_CATALOG_TAG;
+    } catch {
+        return true;
+    }
+}
+
+/** Read the key list before any property value: a plain get can materialise a key on a proxy. */
+function ownKeysOf(container) {
+    try {
+        return Reflect.ownKeys(container);
+    } catch {
+        return [];
+    }
+}
+
+function providerIn(container, seen, depth, via) {
     if (!container || typeof container !== "object" || depth > 2) return null;
     if (seen.has(container)) return null;
+    if (isMessageCatalog(container)) return null;
     seen.add(container);
-    if (typeof container.getSuperProperties === "function") {
-        return { parent: container, name: "getSuperProperties" };
+    const keys = ownKeysOf(container);
+    if (keys.includes("getSuperProperties") && typeof container.getSuperProperties === "function") {
+        return { parent: container, name: "getSuperProperties", keys, via };
     }
     for (const value of Object.values(container)) {
         if (!value || typeof value !== "object") continue;
-        const found = providerIn(value, seen, depth + 1);
+        const found = providerIn(value, seen, depth + 1, via);
         if (found) return found;
     }
     return null;
@@ -89,11 +121,11 @@ export function findSuperPropertiesProvider(require) {
     const entries = Object.values(cache);
     const seen = new WeakSet();
     for (const entry of entries) {
-        const found = providerIn(entry?.exports?.default, seen, 0);
+        const found = providerIn(entry?.exports?.default, seen, 0, "default");
         if (found) return found;
     }
     for (const entry of entries) {
-        const found = providerIn(entry?.exports, seen, 0);
+        const found = providerIn(entry?.exports, seen, 0, "exports");
         if (found) return found;
     }
     return null;
@@ -122,7 +154,7 @@ export function createSpoofer({
     let generation = 0;
     let timer = null;
     let unpatch = null;
-    let patched = null;
+    let observed = { browser: null, provider: null };
 
     function set(next, reason = null) {
         status = { state: next, reason };
@@ -139,11 +171,18 @@ export function createSpoofer({
 
     function attach(provider, myGeneration) {
         if (myGeneration !== generation) return;
+        const label = `${provider.via}.${provider.name}`;
         try {
-            unpatch = patcher.after(provider.name, provider.parent, (args, response) =>
-                rewritePlatform(response, store.clientType)
-            );
-            patched = provider.parent;
+            unpatch = patcher.after(provider.name, provider.parent, (args, response) => {
+                const rewritten = rewritePlatform(response, store.clientType);
+                // What the patched function really returned, so a wrong object cannot look right.
+                observed = {
+                    browser: typeof rewritten?.browser === "string" ? rewritten.browser : null,
+                    provider: label
+                };
+                return rewritten;
+            });
+            observed = { browser: null, provider: label };
             set("active");
         } catch (error) {
             set("unsupported", `could not patch ${provider.name}: ${error?.message ?? error}`);
@@ -201,27 +240,23 @@ export function createSpoofer({
             try { unpatch(); } catch { }
             unpatch = null;
         }
-        patched = null;
+        observed = { browser: null, provider: null };
         set("stopped");
     }
 
     /**
-     * Calls the patched function once, so the settings can show the value Discord will actually
-     * send instead of the value the plugin meant to send. This reads; it never sends anything.
+     * The last browser value the patched function actually returned, and how the object was
+     * reached. Reading this never calls Discord's function, so it cannot produce side effects or
+     * console noise. `browser` stays null until the function has run at least once.
      */
-    function getBrowser() {
-        if (!patched || typeof patched.getSuperProperties !== "function") return null;
-        try {
-            return patched.getSuperProperties()?.browser ?? null;
-        } catch {
-            return null;
-        }
+    function getObserved() {
+        return { ...observed };
     }
 
     return {
         start,
         stop,
-        getBrowser,
+        getObserved,
         getStatus: () => ({ ...status })
     };
 }

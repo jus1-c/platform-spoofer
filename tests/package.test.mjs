@@ -114,17 +114,34 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
         assert.equal(shelter.plugin.store.clientType, "desktop");
         // One patch, on the app runtime: the polyfill runtime that answers last must not win.
         assert.deepEqual(patcher.patches, ["getSuperProperties"]);
-        assert.equal(behaviour.getSuperProperties().browser, "Discord Client");
 
         const status = window.PlatformSpoof.status();
         assert.deepEqual(
-            { state: status.state, clientType: status.clientType, browser: status.browser },
-            { state: "active", clientType: "desktop", browser: "Discord Client" }
+            {
+                state: status.state,
+                clientType: status.clientType,
+                configured: status.configured,
+                reported: status.reported,
+                provider: status.provider
+            },
+            {
+                state: "active",
+                clientType: "desktop",
+                configured: "Discord Client",
+                reported: null,
+                provider: "default.getSuperProperties"
+            }
         );
+
+        // Asking for status must not run Discord's function; the value comes from its last call.
+        window.PlatformSpoof.status();
+        assert.equal(window.PlatformSpoof.status().reported, null);
+        assert.equal(behaviour.getSuperProperties().browser, "Discord Client");
+        assert.equal(window.PlatformSpoof.status().reported, "Discord Client");
 
         window.PlatformSpoof.setSpoof("mobile");
         assert.equal(behaviour.getSuperProperties().browser, "Android");
-        assert.equal(window.PlatformSpoof.status().browser, "Android");
+        assert.equal(window.PlatformSpoof.status().reported, "Android");
 
         plugin.onUnload();
         assert.equal(behaviour.getSuperProperties().browser, "Chrome");

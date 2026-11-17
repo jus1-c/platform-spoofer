@@ -57,9 +57,15 @@ One selector and one status line, which describes the state the plugin actually 
 The line is marked in warning colour when the build refused the patch, so a silent failure cannot
 be mistaken for success. The selector updates the moment you pick a value; no reload needed.
 
-`window.PlatformSpoof.status()` in the console returns the same information, plus the `browser`
-value the patched function currently returns. It describes local state only: it cannot prove what
-another client sees.
+`window.PlatformSpoof.status()` in the console returns the same information plus:
+
+- `configured` — the name the setting asks for;
+- `reported` — the `browser` value the patched function actually returned the last time Discord
+  called it, and `null` until it has run;
+- `provider` — which object was patched, e.g. `default.getSuperProperties`.
+
+Reading the status never calls Discord's function. It describes local state only: it cannot prove
+what another client sees.
 
 ## Limits
 

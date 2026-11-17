@@ -188,25 +188,129 @@ test("the object the gateway identifies with is preferred over a namespace gette
     assert.equal(provider.parent, gatewayObject);
 });
 
-test("status reads the value the patched function actually returns", async () => {
+test("an object that answers every property name is not mistaken for the provider", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    // Discord's message catalog behaves like this: any name returns a function.
+    const catalog = new Proxy({}, {
+        get: () => () => "missing message",
+        getOwnPropertyDescriptor: () => undefined,
+        has: () => false
+    });
+    const scope = fakeScope([{ messages: catalog }]);
+
+    assert.equal(findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]), null);
+});
+
+test("a catalog that creates a property when it is asked for one is not patched", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const warnings = [];
+    // Copied from Discord's makeMessagesProxy: reading any name, or asking whether it is an
+    // own property, creates a function on the target. A key snapshot must come first.
+    const target = {};
+    const message = key => locale => { warnings.push({ key, locale }); return { fallback: true }; };
+    const catalog = new Proxy(target, {
+        ownKeys: value => Reflect.ownKeys(value),
+        getOwnPropertyDescriptor(value, key) {
+            value[key] || (value[key] = message(key));
+            return Reflect.getOwnPropertyDescriptor(value, key);
+        },
+        get(value, key) {
+            if (key === "$$typeof") return "object";
+            if (key === Symbol.toStringTag) return "IntlMessagesProxy";
+            value[key] || (value[key] = message(key));
+            return value[key];
+        }
+    });
+    const analytics = { getSuperProperties: () => ({ browser: "Edge" }) };
+    const scope = fakeScope([{ default: catalog }, { default: analytics }]);
+
+    const provider = findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]);
+
+    assert.equal(provider.parent, analytics);
+    assert.deepEqual(Reflect.ownKeys(target), []);
+    assert.deepEqual(warnings, []);
+});
+
+test("a catalog that has already been probed by something else is still skipped", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const target = {};
+    const catalog = new Proxy(target, {
+        ownKeys: value => Reflect.ownKeys(value),
+        getOwnPropertyDescriptor(value, key) {
+            target[key] || (target[key] = () => "message");
+            return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+        get(value, key) {
+            if (key === Symbol.toStringTag) return "IntlMessagesProxy";
+            target[key] || (target[key] = () => "message");
+            return target[key];
+        }
+    });
+    // Another plugin probed it first, so the name now really is an own property.
+    assert.equal(typeof catalog.getSuperProperties, "function");
+    const analytics = { getSuperProperties: () => ({ browser: "Edge" }) };
+    const scope = fakeScope([{ default: catalog }, { default: analytics }]);
+
+    const provider = findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]);
+
+    assert.equal(provider.parent, analytics);
+});
+
+test("an object without a browser field is left alone instead of gaining one", async () => {
+    const { rewritePlatform } = await loadSpoof();
+    const message = { fallback: true };
+    assert.equal(rewritePlatform(message, "desktop"), message);
+
+    const withoutBrowser = { os: "Windows" };
+    assert.equal(rewritePlatform(withoutBrowser, "desktop"), withoutBrowser);
+});
+
+test("status never calls the patched function: it reports the last value it returned", async () => {
     const { createSpoofer } = await loadSpoof();
-    const behaviour = { getSuperProperties: () => ({ os: "Windows", browser: "Chrome" }) };
+    let calls = 0;
+    const behaviour = {
+        getSuperProperties: () => {
+            calls++;
+            return { os: "Windows", browser: "Chrome" };
+        }
+    };
     const patcher = fakePatcher();
     const timers = fakeTimers();
     const spoofer = createSpoofer({
-        scope: fakeScope([behaviour]),
+        scope: fakeScope([{ default: behaviour }]),
         store: { clientType: "desktop" },
         patcher,
         setTimeout: timers.setTimeout,
         clearTimeout: timers.clearTimeout
     });
 
-    assert.equal(spoofer.getBrowser(), null);
+    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null });
+
     spoofer.start();
-    assert.equal(spoofer.getBrowser(), "Discord Client");
+    assert.equal(spoofer.getStatus().state, "active");
+    assert.equal(calls, 0);
+    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: "default.getSuperProperties" });
+
+    behaviour.getSuperProperties();
+    assert.equal(calls, 1);
+    assert.deepEqual(spoofer.getObserved(), { browser: "Discord Client", provider: "default.getSuperProperties" });
+
+    // Asking for the status twice must not run Discord's function again.
+    spoofer.getObserved();
+    spoofer.getObserved();
+    assert.equal(calls, 1);
 
     spoofer.stop();
-    assert.equal(spoofer.getBrowser(), null);
+    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null });
+});
+
+test("a function that only lives on a prototype is not used", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const provider = { getSuperProperties: () => ({ browser: "Chrome" }) };
+    const wrapper = { __proto__: provider };
+    const scope = fakeScope([wrapper]);
+
+    assert.equal(findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]), null);
 });
 
 test("the spoofer patches the runtime that carries the provider, not the last one to answer", async () => {
