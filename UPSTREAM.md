@@ -1,0 +1,30 @@
+# Upstream source
+
+Started from the upstream plugin, copied verbatim on 2026-11-17:
+
+- Repository: <https://github.com/SpikeHD/shelter-plugins>
+- Path: `plugins/platform-spoof/`
+- Repo commit: `427391668cdd6df3e2d33354e39cca9a90a0d232`
+- `index.tsx` blob: `b9cf97656d083ab70302b5382c5083e706f1de93`
+
+That original file is kept in git history at commit `31436a6` of this repository.
+
+## What changed in the port
+
+| Upstream | Here |
+| --- | --- |
+| `index.tsx`, top-level side effects | `index.jsx` that starts in `onLoad` and stops in `onUnload` |
+| Patches at import time, throws when the module is missing | Waits up to 10 s, reports the reason in settings, never throws at load |
+| `@cumjar/websmack` + `spitroast` dependencies | Dependency-free discovery plus `shelter.patcher`, so the build has no bundled library |
+| Imports `../../components/RadioGroup` from the parent repository | Settings built from `shelter.ui` only |
+| No cleanup | Every patch and interceptor is removed on unload |
+| No tests | `tests/platform-spoofer*.test.mjs` |
+
+The settings UI therefore differs from upstream. The `window.PlatformSpoof` global is still
+created, so anything that refers to it keeps working.
+
+## Not copied
+
+`components/RadioGroup.tsx`, `components/Radio.tsx`, the `Component<…>` global type and the
+`*.tsx.scss` handling of that repository's bundler. This port uses `shelter.ui` instead, which is
+why the plugin bundle has no other files to load.

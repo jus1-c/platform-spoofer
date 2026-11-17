@@ -1,0 +1,16 @@
+{
+  "name": "platform-spoofer-shelter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "lune build plugin --to dist",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@uwu/lune": "1.6.3"
+  },
+  "overrides": {
+    "esbuild": "0.28.2",
+    "rolldown": "1.3.2"
+  }
+}
