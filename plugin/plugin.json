@@ -1,5 +1,5 @@
 {
   "name": "Platform Spoof",
   "author": "SpikeHD; Dorion build",
-  "description": "Dorion build of SpikeHD's Platform Spoof, a Shelter plugin: reports this Discord client as a desktop, web or mobile client instead of whatever it detected. Already a Shelter plugin upstream; this repository is the port to Dorion, not a rewrite for Vencord."
+  "description": "Reports this Discord client as a desktop, web or mobile client instead of whatever it detected. Dorion build of SpikeHD's Platform Spoof Shelter plugin."
 }

@@ -1,13 +1,7 @@
-# Platform Spoof — Dorion build
+# Platform Spoof
 
 Reports this Discord client as a **desktop**, **web** or **mobile** client instead of whatever it
-detected.
-
-SpikeHD's [Platform Spoof](https://github.com/SpikeHD/shelter-plugins) is **already a Shelter
-plugin**. This repository does not port it to Shelter — it is the **Dorion build**: the same idea,
-changed so it loads and behaves correctly inside the web client
-[Dorion](https://github.com/SpikeHD/Dorion) hosts. It installs from a URL inside Discord's Shelter
-settings, it is not a Vencord plugin, and the upstream plugin is untouched.
+detected. Dorion build of SpikeHD's Platform Spoof Shelter plugin.
 
 ## Install
 

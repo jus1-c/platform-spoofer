@@ -8,10 +8,7 @@ Started from the upstream plugin, copied on 2026-11-17:
 - `index.tsx` blob: `b9cf97656d083ab70302b5382c5083e706f1de93`
 
 The original file is not part of this repository; it can be read at the upstream commit above.
-
-The upstream plugin is already a Shelter plugin. This repository is the **Dorion build** of it: the
-changes below make it load and behave correctly in the web client Dorion hosts. They are not a port
-to Shelter, and nothing here is written for Vencord.
+This repository is its Dorion build.
 
 ## What changed in the port
 
