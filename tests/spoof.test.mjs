@@ -284,16 +284,26 @@ test("status never calls the patched function: it reports the last value it retu
         clearTimeout: timers.clearTimeout
     });
 
-    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null });
+    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null, moduleId: null, analytics: false });
 
     spoofer.start();
     assert.equal(spoofer.getStatus().state, "active");
     assert.equal(calls, 0);
-    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: "default.getSuperProperties" });
+    assert.deepEqual(spoofer.getObserved(), {
+        browser: null,
+        provider: "default.getSuperProperties",
+        moduleId: "0",
+        analytics: false
+    });
 
     behaviour.getSuperProperties();
     assert.equal(calls, 1);
-    assert.deepEqual(spoofer.getObserved(), { browser: "Discord Client", provider: "default.getSuperProperties" });
+    assert.deepEqual(spoofer.getObserved(), {
+        browser: "Discord Client",
+        provider: "default.getSuperProperties",
+        moduleId: "0",
+        analytics: false
+    });
 
     // Asking for the status twice must not run Discord's function again.
     spoofer.getObserved();
@@ -301,7 +311,34 @@ test("status never calls the patched function: it reports the last value it retu
     assert.equal(calls, 1);
 
     spoofer.stop();
-    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null });
+    assert.deepEqual(spoofer.getObserved(), { browser: null, provider: null, moduleId: null, analytics: false });
+});
+
+test("the debug view names the module and whether the object looks like the analytics one", async () => {
+    const { createSpoofer } = await loadSpoof();
+    const analytics = {
+        getSuperProperties: () => ({ browser: "Chrome" }),
+        extendSuperProperties() { },
+        getSuperPropertiesBase64: () => "unused"
+    };
+    const scope = fakeScope([{ unrelated: {} }, { default: analytics }]);
+    const patcher = fakePatcher();
+    const timers = fakeTimers();
+    const spoofer = createSpoofer({
+        scope,
+        store: { clientType: "desktop" },
+        patcher,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout
+    });
+
+    spoofer.start();
+    assert.deepEqual(spoofer.getObserved(), {
+        browser: null,
+        provider: "default.getSuperProperties",
+        moduleId: "1",
+        analytics: true
+    });
 });
 
 test("a function that only lives on a prototype is not used", async () => {

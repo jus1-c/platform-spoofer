@@ -93,18 +93,28 @@ function ownKeysOf(container) {
     }
 }
 
-function providerIn(container, seen, depth, via) {
+/** Own keys that only the analytics object has, so a debug view can name what was patched. */
+const ANALYTICS_KEYS = ["extendSuperProperties", "getSuperPropertiesBase64"];
+
+function providerIn(container, seen, depth, via, moduleId) {
     if (!container || typeof container !== "object" || depth > 2) return null;
     if (seen.has(container)) return null;
     if (isMessageCatalog(container)) return null;
     seen.add(container);
     const keys = ownKeysOf(container);
     if (keys.includes("getSuperProperties") && typeof container.getSuperProperties === "function") {
-        return { parent: container, name: "getSuperProperties", keys, via };
+        return {
+            parent: container,
+            name: "getSuperProperties",
+            keys,
+            via,
+            moduleId,
+            analytics: ANALYTICS_KEYS.every(key => keys.includes(key))
+        };
     }
     for (const value of Object.values(container)) {
         if (!value || typeof value !== "object") continue;
-        const found = providerIn(value, seen, depth + 1, via);
+        const found = providerIn(value, seen, depth + 1, via, moduleId);
         if (found) return found;
     }
     return null;
@@ -118,14 +128,14 @@ function providerIn(container, seen, depth, via) {
 export function findSuperPropertiesProvider(require) {
     const cache = require?.c;
     if (!cache || typeof cache !== "object") return null;
-    const entries = Object.values(cache);
+    const entries = Object.entries(cache);
     const seen = new WeakSet();
-    for (const entry of entries) {
-        const found = providerIn(entry?.exports?.default, seen, 0, "default");
+    for (const [moduleId, entry] of entries) {
+        const found = providerIn(entry?.exports?.default, seen, 0, "default", moduleId);
         if (found) return found;
     }
-    for (const entry of entries) {
-        const found = providerIn(entry?.exports, seen, 0, "exports");
+    for (const [moduleId, entry] of entries) {
+        const found = providerIn(entry?.exports, seen, 0, "exports", moduleId);
         if (found) return found;
     }
     return null;
@@ -154,7 +164,7 @@ export function createSpoofer({
     let generation = 0;
     let timer = null;
     let unpatch = null;
-    let observed = { browser: null, provider: null };
+    let observed = { browser: null, provider: null, moduleId: null, analytics: false };
 
     function set(next, reason = null) {
         status = { state: next, reason };
@@ -172,17 +182,18 @@ export function createSpoofer({
     function attach(provider, myGeneration) {
         if (myGeneration !== generation) return;
         const label = `${provider.via}.${provider.name}`;
+        const origin = { provider: label, moduleId: provider.moduleId, analytics: provider.analytics };
         try {
             unpatch = patcher.after(provider.name, provider.parent, (args, response) => {
                 const rewritten = rewritePlatform(response, store.clientType);
                 // What the patched function really returned, so a wrong object cannot look right.
                 observed = {
                     browser: typeof rewritten?.browser === "string" ? rewritten.browser : null,
-                    provider: label
+                    ...origin
                 };
                 return rewritten;
             });
-            observed = { browser: null, provider: label };
+            observed = { browser: null, ...origin };
             set("active");
         } catch (error) {
             set("unsupported", `could not patch ${provider.name}: ${error?.message ?? error}`);
@@ -240,7 +251,7 @@ export function createSpoofer({
             try { unpatch(); } catch { }
             unpatch = null;
         }
-        observed = { browser: null, provider: null };
+        observed = { browser: null, provider: null, moduleId: null, analytics: false };
         set("stopped");
     }
 

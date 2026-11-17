@@ -84,7 +84,9 @@ export function onLoad() {
                 clientType,
                 configured: browserFor(clientType),
                 reported: observed.browser,
-                provider: observed.provider
+                provider: observed.provider,
+                moduleId: observed.moduleId,
+                analytics: observed.analytics
             };
         }
     };

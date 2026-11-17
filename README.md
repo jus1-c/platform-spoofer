@@ -62,7 +62,9 @@ be mistaken for success. The selector updates the moment you pick a value; no re
 - `configured` — the name the setting asks for;
 - `reported` — the `browser` value the patched function actually returned the last time Discord
   called it, and `null` until it has run;
-- `provider` — which object was patched, e.g. `default.getSuperProperties`.
+- `provider` — which object was patched, e.g. `default.getSuperProperties`;
+- `moduleId` — the module it came from, and `analytics`, which is `true` when the object also has
+  `extendSuperProperties` and `getSuperPropertiesBase64` (the shape of Discord's analytics object).
 
 Reading the status never calls Discord's function. It describes local state only: it cannot prove
 what another client sees.

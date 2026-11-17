@@ -122,14 +122,18 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
                 clientType: status.clientType,
                 configured: status.configured,
                 reported: status.reported,
-                provider: status.provider
+                provider: status.provider,
+                moduleId: status.moduleId,
+                analytics: status.analytics
             },
             {
                 state: "active",
                 clientType: "desktop",
                 configured: "Discord Client",
                 reported: null,
-                provider: "default.getSuperProperties"
+                provider: "default.getSuperProperties",
+                moduleId: "0",
+                analytics: false
             }
         );
 
