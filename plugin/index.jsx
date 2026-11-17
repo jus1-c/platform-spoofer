@@ -10,30 +10,31 @@
  */
 
 import { createSpoofer, normalizeClientType } from "./spoof.js";
-import { createQuestCompatibility } from "./quests.js";
 
 const { store } = shelter.plugin;
-const { Header, HeaderTags, Text, Button, ButtonColors, ButtonSizes, SwitchItem } = shelter.ui;
+const { Select, SelectOption } = shelter.ui;
 
 store.clientType ??= "desktop";
-store.desktopQuests ??= false;
 
 const scoped = shelter.plugin.scoped;
 const patcher = scoped?.patcher ?? shelter.patcher;
-const intercept = scoped?.http?.intercept
-    ? (method, filter, callback) => scoped.http.intercept(method, filter, callback)
-    : (method, filter, callback) => shelter.http.intercept(method, filter, callback);
 
-const OPTIONS = [
-    { value: "desktop", label: "Desktop client" },
-    { value: "web", label: "Web" },
-    { value: "mobile", label: "Mobile" }
-];
+// Settings must repaint the moment a choice changes, so the selected type and the patch state
+// live in signals instead of being read from the mutable store during render.
+const createSignal = shelter.solid?.createSignal ?? (initial => {
+    let value = initial;
+    return [() => value, next => { value = next; }];
+});
+
+const [clientType, setClientType] = createSignal(normalizeClientType(store.clientType));
+const [status, setStatus] = createSignal({ state: "idle", reason: null });
 
 const STYLE_ID = "platform-spoof-settings";
 const styles = `
-.pspoof-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
-.pspoof-status { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted, #b5bac1); }
+.pspoof-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
+.pspoof-label { font-size: 14px; font-weight: 500; color: var(--text-normal, #dbdee1); }
+.pspoof-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-muted, #b5bac1); }
+.pspoof-warning { color: var(--text-warning, #f0b232); }
 `;
 
 function applyStyles() {
@@ -47,76 +48,65 @@ function applyStyles() {
 const spoofer = createSpoofer({
     scope: typeof window !== "undefined" ? window : {},
     store,
-    patcher
+    patcher,
+    onStatus: next => setStatus(next)
 });
 
-const questCompatibility = createQuestCompatibility({ intercept, store });
-
-function spoofStatusLine() {
-    const status = spoofer.getStatus();
-    if (status.state === "active") return `Identification patched: showing as ${store.clientType}.`;
-    if (status.state === "unsupported") return `Cannot spoof on this build: ${status.reason}.`;
-    if (status.state === "stopped") return "Spoofing is off.";
-    return `Looking for Discord's identification function (${status.reason ?? "starting"}).`;
-}
-
-function questStatusLine() {
-    const status = questCompatibility.getStatus();
-    if (normalizeClientType(store.clientType) !== "desktop") return "Desktop quest identity needs the Desktop selection.";
-    if (!status.active) return "Desktop quest identity is off.";
-    return `Desktop quest identity: ${status.rewritten} heartbeat(s) rewritten, ${status.untouched} left as they were.`;
+function statusText(current, type) {
+    if (current.state === "active") return `Discord is told this is a ${type} client.`;
+    if (current.state === "unsupported") return `Cannot spoof on this Discord build: ${current.reason}.`;
+    if (current.state === "stopped") return "Spoofing is off.";
+    if (current.state === "waiting") return `Waiting for Discord to finish loading (${current.reason ?? "starting"}).`;
+    return "Not started.";
 }
 
 export function onLoad() {
     applyStyles();
-    // Upstream exposed this global; keep it working for plugins or notes that refer to it.
+    // Upstream exposed this global; keep it working for anything that refers to it.
     // @ts-expect-error assigning to window
     window.PlatformSpoof = {
         desktop: "Discord Client",
         web: "Chrome",
         mobile: "Android",
-        setSpoof: type => { store.clientType = normalizeClientType(type); }
+        setSpoof: type => { store.clientType = normalizeClientType(type); setClientType(store.clientType); }
     };
     void spoofer.start();
-    questCompatibility.start();
 }
 
 export function onUnload() {
     spoofer.stop();
-    questCompatibility.stop();
     if (typeof window !== "undefined" && window.PlatformSpoof?.setSpoof) delete window.PlatformSpoof;
     if (typeof document !== "undefined") document.getElementById(STYLE_ID)?.remove();
 }
 
 export function settings() {
     applyStyles();
+    // Every signal read happens inside the JSX on purpose: Solid only tracks a dependency that
+    // is read while rendering, so a value read here first would freeze the panel until re-entry.
     return (
         <div>
-            <Header tag={HeaderTags.H1}>Client type</Header>
-            <div class="pspoof-row">
-                {OPTIONS.map(option => (
-                    <Button
-                        size={ButtonSizes?.SMALL}
-                        color={normalizeClientType(store.clientType) === option.value ? ButtonColors?.BRAND : ButtonColors?.SECONDARY}
-                        onClick={() => { store.clientType = option.value; }}
-                    >
-                        {option.label}
-                    </Button>
-                ))}
+            <div class="pspoof-field">
+                <label class="pspoof-label" for="pspoof-client-type">Client type</label>
+                <Select
+                    value={clientType()}
+                    aria-label="Client type"
+                    onChange={value => {
+                        store.clientType = normalizeClientType(value);
+                        setClientType(store.clientType);
+                    }}
+                >
+                    <SelectOption value="desktop">Desktop client</SelectOption>
+                    <SelectOption value="web">Web</SelectOption>
+                    <SelectOption value="mobile">Mobile</SelectOption>
+                </Select>
+                <p class={status().state === "unsupported" ? "pspoof-note pspoof-warning" : "pspoof-note"}>
+                    {statusText(status(), clientType())}
+                </p>
             </div>
-            <p class="pspoof-status">{spoofStatusLine()}</p>
-            <SwitchItem
-                value={store.desktopQuests === true}
-                onChange={value => { store.desktopQuests = value; }}
-                note="Experimental. Rewrites the client identity Discord already attached to quest heartbeats, so desktop quests can recognise this client. It never invents a heartbeat and needs the Desktop selection."
-            >
-                Desktop quest identity
-            </SwitchItem>
-            <p class="pspoof-status">{questStatusLine()}</p>
-            <Text>
-                Spoofing changes how Discord labels this client. It cannot provide game detection,
-                so a quest that needs a running game is still out of reach.
-            </Text>
+            <p class="pspoof-note">
+                Only the reported platform changes: game detection, a real stream and a real viewer
+                cannot be spoofed.
+            </p>
         </div>
     );
 }

@@ -28,7 +28,7 @@ function scopeWithProvider(behaviour) {
         }
         return 0;
     };
-    return { webpackChunkdiscord_app: chunk };
+    return { webpackChunkDiscord_app: chunk };
 }
 
 function patcherRecorder() {
@@ -46,6 +46,12 @@ function patcherRecorder() {
     };
 }
 
+/** Minimal signal implementation so the settings module can be loaded outside Shelter. */
+function createSignal(initial) {
+    let value = initial;
+    return [() => value, next => { value = next; }];
+}
+
 test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
     const temporaryRoot = existsSync("/tmp/opencode") ? "/tmp/opencode" : tmpdir();
     const output = mkdtempSync(join(temporaryRoot, "spoofer-build-"));
@@ -60,26 +66,25 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
         assert.match(manifest.description, /not in Vencord/);
         // The upstream settings component lives in the source repository, not in the plugin.
         assert.doesNotMatch(code, /RadioGroup/);
+        // The plugin only spoofs the reported platform; it does not touch requests.
+        assert.doesNotMatch(code, /http\.intercept/);
+        assert.doesNotMatch(code, /x-super-properties/i);
+        // Settings are a single select, not a row of buttons that can overflow.
+        assert.match(code, /pspoof-client-type/);
+        // The quest-identity layer was removed; nothing here may look at requests.
+        assert.doesNotMatch(code, /desktopQuests/);
+        assert.doesNotMatch(code, /SwitchItem/);
+        // Solid only tracks reads made while rendering, so the select value must be a getter.
+        assert.match(code, /get value\(\) \{\s*return clientType\(\)/);
 
         const behaviour = { getSuperProperties: () => ({ os: "Windows", browser: "Chrome" }) };
         const patcher = patcherRecorder();
-        const intercepts = [];
-        const scoped = {
-            patcher,
-            http: {
-                intercept(method, filter, callback) {
-                    intercepts.push({ method, filter, callback });
-                    return () => { intercepts.length = 0; };
-                }
-            }
-        };
         const shelter = {
-            plugin: { store: {}, scoped },
+            plugin: { store: {}, scoped: { patcher } },
             ui: {},
-            solid: {},
+            solid: { createSignal },
             solidWeb: { template: () => () => ({}), delegateEvents: () => { } },
-            patcher,
-            http: { intercept: scoped.http.intercept }
+            patcher
         };
         const plugin = vm.runInNewContext(code, {
             shelter,
@@ -97,21 +102,17 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
 
         plugin.onLoad();
         assert.equal(shelter.plugin.store.clientType, "desktop");
-        assert.equal(shelter.plugin.store.desktopQuests, false);
         assert.deepEqual(patcher.patches, ["getSuperProperties"]);
         assert.equal(behaviour.getSuperProperties().browser, "Discord Client");
-        assert.equal(intercepts.length, 1);
-        assert.equal(intercepts[0].method, "post");
 
         plugin.onUnload();
         assert.equal(behaviour.getSuperProperties().browser, "Chrome");
-        assert.equal(intercepts.length, 0);
     } finally {
         rmSync(output, { recursive: true, force: true });
     }
 });
 
-test("the build scripts target this plugin", async () => {
+test("the build script targets this plugin", async () => {
     const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
     assert.equal(scripts.build, "lune build plugin --to dist");
 });

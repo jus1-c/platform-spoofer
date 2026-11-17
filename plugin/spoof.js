@@ -99,6 +99,7 @@ export function createSpoofer({
     scope,
     store,
     patcher,
+    onStatus,
     setTimeout: schedule = setTimeout,
     clearTimeout: cancel = clearTimeout,
     waitMs = DEFAULT_WAIT_MS,
@@ -113,6 +114,8 @@ export function createSpoofer({
 
     function set(next, reason = null) {
         status = { state: next, reason };
+        // The settings view reads this, so a change has to be announced rather than polled.
+        if (typeof onStatus === "function") onStatus({ ...status });
     }
 
     function clearTimer() {

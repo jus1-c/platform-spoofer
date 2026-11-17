@@ -1,5 +1,5 @@
 {
   "name": "Platform Spoof (Shelter)",
   "author": "SpikeHD; Shelter port",
-  "description": "Shelter plugin for Dorion that reports this client as a desktop, web or mobile Discord client, with an optional desktop identity for quest requests. A port of SpikeHD's Platform Spoof; it runs in Shelter, not in Vencord."
+  "description": "Shelter plugin for Dorion that reports this client as a desktop, web or mobile Discord client. A port of SpikeHD's Platform Spoof; it runs in Shelter, not in Vencord."
 }

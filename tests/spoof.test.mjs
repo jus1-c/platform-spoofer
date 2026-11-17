@@ -299,6 +299,26 @@ test("a patcher that refuses the module is reported, not thrown", async () => {
     assert.match(status.reason, /frozen module/);
 });
 
+test("every state change is announced so the settings can repaint", async () => {
+    const { createSpoofer } = await loadSpoof();
+    const behaviour = { getSuperProperties: () => ({ browser: "Chrome" }) };
+    const patcher = fakePatcher();
+    const timers = fakeTimers();
+    const seen = [];
+    const spoofer = createSpoofer({
+        scope: fakeScope([behaviour]),
+        store: { clientType: "desktop" },
+        patcher,
+        onStatus: next => seen.push(next.state),
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout
+    });
+
+    spoofer.start();
+    spoofer.stop();
+    assert.deepEqual(seen, ["waiting", "active", "stopped"]);
+});
+
 test("a spoofer without a patcher is rejected up front", async () => {
     const { createSpoofer } = await loadSpoof();
     assert.throws(() => createSpoofer({ scope: {}, store: {}, patcher: undefined }), /patcher/);

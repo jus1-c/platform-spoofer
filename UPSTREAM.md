@@ -1,13 +1,13 @@
 # Upstream source
 
-Started from the upstream plugin, copied verbatim on 2026-11-17:
+Started from the upstream plugin, copied on 2026-11-17:
 
 - Repository: <https://github.com/SpikeHD/shelter-plugins>
 - Path: `plugins/platform-spoof/`
 - Repo commit: `427391668cdd6df3e2d33354e39cca9a90a0d232`
 - `index.tsx` blob: `b9cf97656d083ab70302b5382c5083e706f1de93`
 
-That original file is kept in git history at commit `31436a6` of this repository.
+The original file is not part of this repository; it can be read at the upstream commit above.
 
 ## What changed in the port
 
@@ -17,11 +17,13 @@ That original file is kept in git history at commit `31436a6` of this repository
 | Patches at import time, throws when the module is missing | Waits up to 10 s, reports the reason in settings, never throws at load |
 | `@cumjar/websmack` + `spitroast` dependencies | Dependency-free discovery plus `shelter.patcher`, so the build has no bundled library |
 | Imports `../../components/RadioGroup` from the parent repository | Settings built from `shelter.ui` only |
-| No cleanup | Every patch and interceptor is removed on unload |
-| No tests | `tests/platform-spoofer*.test.mjs` |
+| `RadioGroup` of three options | One `<Select>` with three options, so long labels cannot overflow the panel |
+| Settings read the plain store and only repaint after a re-entry | Selection and patch state live in signals, so a click repaints immediately |
+| Oversized `Header` title | A plain label at the same size as the plugin's other fields |
+| No cleanup | The patch is removed on unload |
+| No tests | `tests/spoof.test.mjs`, `tests/package.test.mjs` |
 
-The settings UI therefore differs from upstream. The `window.PlatformSpoof` global is still
-created, so anything that refers to it keeps working.
+The `window.PlatformSpoof` global is still created, so anything that refers to it keeps working.
 
 ## Not copied
 

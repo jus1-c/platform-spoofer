@@ -10,13 +10,11 @@ ported from is untouched.
 
 ## Install
 
-1. Create a repository from this source and let the `Build and deploy Shelter plugin` workflow run
-   (see [Publishing](#publishing)).
-2. In Dorion, open Discord **User Settings → Shelter → Plugins → Install Plugin** and enter:
+In Dorion, open Discord **User Settings → Shelter → Plugins → Install Plugin** and enter:
 
-   ```text
-   https://<owner>.github.io/<repository>/
-   ```
+```text
+https://jus1-c.github.io/platform-spoofer/
+```
 
 Shelter fetches `plugin.json` and `plugin.js` from that URL and picks up later builds from it.
 
@@ -33,6 +31,9 @@ its requests. This plugin patches the function that builds them and reports the 
 
 Nothing else in those properties is touched, and the object handed back is a copy.
 
+Selecting **Desktop client** is all that is needed for Discord to treat this client as the desktop
+app. There is no extra switch, and no request of yours is read, rewritten or replayed.
+
 ## Why the upstream version fails on Dorion
 
 The upstream file patches a webpack module from the top level of the plugin, at import time:
@@ -45,26 +46,17 @@ This port starts from `onLoad`, waits up to ten seconds for the function, tells 
 why it gave up instead of throwing, and removes the patch on unload. It no longer needs the
 `@cumjar/websmack` or `spitroast` packages.
 
-## Desktop quest identity (experimental, off by default)
+## Settings
 
-With **Desktop** selected, the switch rewrites the identity Discord already attached to a quest
-heartbeat (`POST /quests/<id>/heartbeat`). It never creates a heartbeat, never changes a body,
-never retries, and leaves every other request alone — enrollment, opening a quest, claiming a
-reward and chat are untouched. If the identity header is not visible at that layer, the request
-goes out exactly as Discord built it and the settings line says so.
+One selector and one status line, which describes the state the plugin actually reached:
 
-That switch cannot make game detection work: it changes how the client is labelled, not what it
-can prove. A quest that requires a running game is still out of reach.
+- `Discord is told this is a <type> client.`
+- `Waiting for Discord to finish loading (<reason>).`
+- `Cannot spoof on this Discord build: <reason>.`
+- `Spoofing is off.`
 
-## Settings and state
-
-The plugin reports what it reached instead of claiming success:
-
-- `Identification patched: showing as <type>.`
-- `Looking for Discord's identification function (<reason>).`
-- `Cannot spoof on this build: <reason>.`
-
-The quest line does the same with `rewritten` and `untouched` heartbeat counts.
+The line is marked in warning colour when the build refused the patch, so a silent failure cannot
+be mistaken for success. The selector updates the moment you pick a value; no reload needed.
 
 ## Limits
 
@@ -74,6 +66,8 @@ The quest line does the same with `rewritten` and `untouched` heartbeat counts.
   check again; the plugin cannot rewrite a session that was already identified.
 - The settings line describes local state. It is not proof that another client sees the spoofed
   platform.
+- This plugin changes a label, not capabilities: game detection, a real stream and a real viewer
+  are still out of reach.
 
 ## Development
 
