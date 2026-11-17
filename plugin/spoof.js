@@ -5,9 +5,10 @@
  *
  * Discord decides which client it is talking to from the `browser` field of its
  * identification properties. The upstream plugin reads that value by patching a webpack
- * module; on Dorion the module is not always there when a plugin loads, so this version
- * waits for it, reports why it gave up instead of throwing, and never touches anything
- * else. A rewritten object is always a copy: the caller's properties are left intact.
+ * module; on Dorion several runtimes share one chunk and the module is not always loaded
+ * when a plugin starts, so this version searches every runtime, waits for the module,
+ * reports why it gave up instead of throwing, and never runs a module factory.
+ * A rewritten object is always a copy: the caller's properties are left intact.
  */
 
 const BROWSERS = {
@@ -41,20 +42,25 @@ export function findWebpackChunk(scope) {
 }
 
 /**
- * Borrows webpack's own require out of the chunk without keeping anything: the temporary
- * module is pushed and popped straight away, exactly like the upstream reader does.
+ * Every runtime the page installed on the chunk, in the order they answer. A page can host
+ * several (app, wasm, sentry), each wrapping the chunk's push, so one push reaches all of them.
+ * Keeping only the last answer loses the app's runtime behind a polyfill loader. The probe entry
+ * is removed again in the same call.
  */
-export function grabRequire(scope, name) {
+export function grabRequires(scope, name) {
     const chunk = scope?.[name];
-    if (!chunk || typeof chunk.push !== "function") return null;
-    let require = null;
+    if (!chunk || typeof chunk.push !== "function") return [];
+    const found = [];
     try {
-        chunk.push([[Symbol("platform-spoof")], {}, module => { require = module; }]);
-        chunk.pop();
+        chunk.push([[Symbol("platform-spoof")], {}, module => {
+            if (typeof module === "function" && !found.includes(module)) found.push(module);
+        }]);
     } catch {
-        return null;
+        return [];
+    } finally {
+        try { chunk.pop(); } catch { }
     }
-    return typeof require === "function" ? require : null;
+    return found;
 }
 
 function providerIn(container, seen, depth) {
@@ -73,15 +79,20 @@ function providerIn(container, seen, depth) {
 }
 
 /**
- * Looks for the module that owns the identification function. Only already loaded modules
- * are inspected: forcing every factory to run would add startup work and side effects for
- * a provider that is usually cached already.
+ * Looks for the module that owns the identification function in one runtime's module cache.
+ * The gateway identifies with the analytics object re-exported as `default`, so that object wins;
+ * a namespace that merely exposes the same function name is only a fallback.
  */
 export function findSuperPropertiesProvider(require) {
     const cache = require?.c;
     if (!cache || typeof cache !== "object") return null;
+    const entries = Object.values(cache);
     const seen = new WeakSet();
-    for (const entry of Object.values(cache)) {
+    for (const entry of entries) {
+        const found = providerIn(entry?.exports?.default, seen, 0);
+        if (found) return found;
+    }
+    for (const entry of entries) {
         const found = providerIn(entry?.exports, seen, 0);
         if (found) return found;
     }
@@ -111,6 +122,7 @@ export function createSpoofer({
     let generation = 0;
     let timer = null;
     let unpatch = null;
+    let patched = null;
 
     function set(next, reason = null) {
         status = { state: next, reason };
@@ -131,6 +143,7 @@ export function createSpoofer({
             unpatch = patcher.after(provider.name, provider.parent, (args, response) =>
                 rewritePlatform(response, store.clientType)
             );
+            patched = provider.parent;
             set("active");
         } catch (error) {
             set("unsupported", `could not patch ${provider.name}: ${error?.message ?? error}`);
@@ -145,13 +158,17 @@ export function createSpoofer({
             set("waiting", "waiting for the webpack chunk");
             return retry(myGeneration, deadline);
         }
-        const require = grabRequire(scope, chunk);
-        if (!require) {
+        const requires = grabRequires(scope, chunk);
+        if (!requires.length) {
             if (Date.now() >= deadline) return set("unsupported", "the webpack chunk could not be read");
             set("waiting", "waiting for a readable webpack chunk");
             return retry(myGeneration, deadline);
         }
-        const provider = findSuperPropertiesProvider(require);
+        let provider = null;
+        for (const require of requires) {
+            provider = findSuperPropertiesProvider(require);
+            if (provider) break;
+        }
         if (!provider) {
             if (Date.now() >= deadline) return set("unsupported", "the identification function was not found");
             set("waiting", "waiting for the identification function");
@@ -184,12 +201,27 @@ export function createSpoofer({
             try { unpatch(); } catch { }
             unpatch = null;
         }
+        patched = null;
         set("stopped");
+    }
+
+    /**
+     * Calls the patched function once, so the settings can show the value Discord will actually
+     * send instead of the value the plugin meant to send. This reads; it never sends anything.
+     */
+    function getBrowser() {
+        if (!patched || typeof patched.getSuperProperties !== "function") return null;
+        try {
+            return patched.getSuperProperties()?.browser ?? null;
+        } catch {
+            return null;
+        }
     }
 
     return {
         start,
         stop,
+        getBrowser,
         getStatus: () => ({ ...status })
     };
 }

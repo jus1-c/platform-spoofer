@@ -17,18 +17,26 @@ function build(output) {
     ], { stdio: "pipe" });
 }
 
-/** A window whose webpack chunk already holds the identification module. */
+/**
+ * A window shaped like Dorion's page: two runtimes share one chunk, and the polyfill runtime is
+ * installed last, so it answers last. Only the app runtime holds the identification module.
+ */
 function scopeWithProvider(behaviour) {
     const chunk = [];
-    chunk.push = function (bundle) {
-        if (typeof bundle?.[2] === "function") {
-            const require = module => module;
-            require.c = { 0: { id: 0, loaded: true, exports: behaviour } };
-            bundle[2](require);
-        }
-        return 0;
-    };
-    return { webpackChunkDiscord_app: chunk };
+    for (const provider of [behaviour, null]) {
+        const cache = {};
+        if (provider) cache[0] = { id: 0, loaded: true, exports: { default: provider } };
+        for (let index = 1; index <= 102; index++) cache[index] = { id: index, loaded: true, exports: {} };
+        const require = module => module;
+        require.c = cache;
+        require.m = {};
+        const parentPush = chunk.push.bind(chunk);
+        chunk.push = function (bundle) {
+            bundle?.[2]?.(require);
+            return parentPush(bundle);
+        };
+    }
+    return { webpackChunkdiscord_app: chunk };
 }
 
 function patcherRecorder() {
@@ -87,9 +95,10 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
             solidWeb: { template: () => () => ({}), delegateEvents: () => { } },
             patcher
         };
+        const window = scopeWithProvider(behaviour);
         const plugin = vm.runInNewContext(code, {
             shelter,
-            window: scopeWithProvider(behaviour),
+            window,
             console,
             URL,
             setTimeout,
@@ -103,11 +112,23 @@ test("Lune builds a Shelter-loadable Platform Spoof bundle", async () => {
 
         plugin.onLoad();
         assert.equal(shelter.plugin.store.clientType, "desktop");
+        // One patch, on the app runtime: the polyfill runtime that answers last must not win.
         assert.deepEqual(patcher.patches, ["getSuperProperties"]);
         assert.equal(behaviour.getSuperProperties().browser, "Discord Client");
 
+        const status = window.PlatformSpoof.status();
+        assert.deepEqual(
+            { state: status.state, clientType: status.clientType, browser: status.browser },
+            { state: "active", clientType: "desktop", browser: "Discord Client" }
+        );
+
+        window.PlatformSpoof.setSpoof("mobile");
+        assert.equal(behaviour.getSuperProperties().browser, "Android");
+        assert.equal(window.PlatformSpoof.status().browser, "Android");
+
         plugin.onUnload();
         assert.equal(behaviour.getSuperProperties().browser, "Chrome");
+        assert.equal(window.PlatformSpoof, undefined);
     } finally {
         rmSync(output, { recursive: true, force: true });
     }

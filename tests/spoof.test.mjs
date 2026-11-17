@@ -12,16 +12,29 @@ async function loadSpoof() {
 
 /** A window-like scope with a webpack chunk that hands out a require with a module cache. */
 function fakeScope(exportsList, { chunkName = "webpackChunkdiscord_app" } = {}) {
-    const cache = {};
-    exportsList.forEach((exports, index) => { cache[index] = { id: index, loaded: true, exports }; });
-    const require = module => module;
-    require.c = cache;
+    return chainedScope([exportsList], { chunkName });
+}
+
+/**
+ * Discord installs one runtime per entry bundle (app, wasm, sentry) and every runtime wraps the
+ * chunk's push, so one push reaches all of them. Installed first runs last.
+ */
+function chainedScope(runtimes, { chunkName = "webpackChunkdiscord_app" } = {}) {
     const chunk = [];
-    chunk.push = function (bundle) {
-        const runtime = bundle?.[2];
-        if (typeof runtime === "function") runtime(require);
-        return Array.prototype.push.call(this, bundle);
-    };
+    for (const runtime of runtimes) {
+        const cache = {};
+        (runtime.cache ?? runtime).forEach((exports, index) => {
+            cache[index] = { id: index, loaded: true, exports };
+        });
+        const require = runtime.require ?? (module => module);
+        require.c = cache;
+        require.m = runtime.factories ?? {};
+        const parentPush = chunk.push.bind(chunk);
+        chunk.push = function (bundle) {
+            bundle?.[2]?.(require);
+            return parentPush(bundle);
+        };
+    }
     return { [chunkName]: chunk };
 }
 
@@ -100,30 +113,130 @@ test("values that are not a properties object are returned untouched", async () 
 });
 
 test("the provider is found in a module cache entry", async () => {
-    const { findSuperPropertiesProvider, grabRequire } = await loadSpoof();
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
     const behaviour = { getSuperProperties: () => ({ browser: "Chrome" }) };
     const scope = fakeScope([{ unrelated: () => { } }, behaviour]);
-    const require = grabRequire(scope, "webpackChunkdiscord_app");
 
-    const provider = findSuperPropertiesProvider(require);
+    const provider = findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]);
     assert.equal(provider.parent, behaviour);
     assert.equal(provider.name, "getSuperProperties");
     assert.equal(typeof behaviour.getSuperProperties, "function");
 });
 
 test("a provider nested one level deep is still found", async () => {
-    const { findSuperPropertiesProvider, grabRequire } = await loadSpoof();
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
     const behaviour = { getSuperProperties: () => ({ browser: "Chrome" }) };
     const scope = fakeScope([{ analytics: behaviour }]);
-    const provider = findSuperPropertiesProvider(grabRequire(scope, "webpackChunkdiscord_app"));
+    const provider = findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]);
     assert.equal(provider.parent, behaviour);
 });
 
+test("one push reaches every installed runtime, and only the app one holds the provider", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const analytics = { getSuperProperties: () => ({ browser: "Edge" }) };
+    // Dorion's page installs several runtimes: the wasm/polyfill one first, the app one last.
+    const scope = chainedScope([
+        { cache: Array.from({ length: 102 }, () => ({})) },
+        { cache: [{ default: analytics }] }
+    ]);
+
+    const requires = grabRequires(scope, "webpackChunkdiscord_app");
+    assert.equal(requires.length, 2);
+    assert.deepEqual(requires.map(require => Object.keys(require.c).length), [1, 102]);
+
+    const found = requires.map(require => findSuperPropertiesProvider(require)).find(Boolean);
+    assert.equal(found.parent, analytics);
+});
+
+test("the order the runtimes were installed in does not matter", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const analytics = { getSuperProperties: () => ({ browser: "Edge" }) };
+    const scope = chainedScope([
+        { cache: [{ default: analytics }] },
+        { cache: Array.from({ length: 102 }, () => ({})) }
+    ]);
+
+    const found = grabRequires(scope, "webpackChunkdiscord_app")
+        .map(require => findSuperPropertiesProvider(require)).find(Boolean);
+    assert.equal(found.parent, analytics);
+});
+
+test("looking for the provider never runs a module factory and leaves the chunk as it was", async () => {
+    const { grabRequires } = await loadSpoof();
+    let executed = 0;
+    const scope = chainedScope([
+        { cache: [{}], factories: { 1: () => { executed++; } } },
+        { cache: [{ default: { getSuperProperties: () => ({}) } }], factories: { 2: () => { executed++; } } }
+    ]);
+    const chunk = scope.webpackChunkdiscord_app;
+    const before = chunk.length;
+
+    const requires = grabRequires(scope, "webpackChunkdiscord_app");
+
+    assert.equal(requires.length, 2);
+    assert.equal(executed, 0);
+    assert.equal(chunk.length, before);
+});
+
+test("the object the gateway identifies with is preferred over a namespace getter", async () => {
+    const { findSuperPropertiesProvider, grabRequires } = await loadSpoof();
+    const namespaceCopy = { getSuperProperties: () => ({ browser: "Chrome" }) };
+    const gatewayObject = { getSuperProperties: () => ({ browser: "Edge" }) };
+    const scope = fakeScope([namespaceCopy, { default: gatewayObject }]);
+
+    const provider = findSuperPropertiesProvider(grabRequires(scope, "webpackChunkdiscord_app")[0]);
+    assert.equal(provider.parent, gatewayObject);
+});
+
+test("status reads the value the patched function actually returns", async () => {
+    const { createSpoofer } = await loadSpoof();
+    const behaviour = { getSuperProperties: () => ({ os: "Windows", browser: "Chrome" }) };
+    const patcher = fakePatcher();
+    const timers = fakeTimers();
+    const spoofer = createSpoofer({
+        scope: fakeScope([behaviour]),
+        store: { clientType: "desktop" },
+        patcher,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout
+    });
+
+    assert.equal(spoofer.getBrowser(), null);
+    spoofer.start();
+    assert.equal(spoofer.getBrowser(), "Discord Client");
+
+    spoofer.stop();
+    assert.equal(spoofer.getBrowser(), null);
+});
+
+test("the spoofer patches the runtime that carries the provider, not the last one to answer", async () => {
+    const { createSpoofer } = await loadSpoof();
+    const analytics = { getSuperProperties: () => ({ browser: "Edge" }) };
+    const scope = chainedScope([
+        { cache: Array.from({ length: 102 }, () => ({})) },
+        { cache: [{ default: analytics }] }
+    ]);
+    const patcher = fakePatcher();
+    const timers = fakeTimers();
+    const spoofer = createSpoofer({
+        scope,
+        store: { clientType: "desktop" },
+        patcher,
+        setTimeout: timers.setTimeout,
+        clearTimeout: timers.clearTimeout
+    });
+
+    spoofer.start();
+    assert.equal(spoofer.getStatus().state, "active");
+    assert.equal(analytics.getSuperProperties().browser, "Discord Client");
+});
+
 test("a missing chunk or require yields no provider instead of throwing", async () => {
-    const { findSuperPropertiesProvider, findWebpackChunk, grabRequire } = await loadSpoof();
+    const { findSuperPropertiesProvider, findWebpackChunk, grabRequires } = await loadSpoof();
     assert.equal(findWebpackChunk({}), null);
     assert.equal(findWebpackChunk(undefined), null);
-    assert.equal(grabRequire({}, "webpackChunkdiscord_app"), null);
+    assert.deepEqual(grabRequires({}, "webpackChunkdiscord_app"), []);
+    assert.deepEqual(grabRequires({ webpackChunkdiscord_app: {} }, "webpackChunkdiscord_app"), []);
     assert.equal(findSuperPropertiesProvider(null), null);
     assert.equal(findSuperPropertiesProvider({}), null);
     assert.equal(findWebpackChunk({ webpackChunkdiscord_app: [] }), "webpackChunkdiscord_app");

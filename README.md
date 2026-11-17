@@ -15,8 +15,8 @@ Shelter fetches `plugin.json` and `plugin.js` from that URL and picks up later b
 
 ## What it actually changes
 
-Discord labels a client from the `browser` field of the identification properties it attaches to
-its requests. This plugin patches the function that builds them and reports the name you picked:
+Discord describes a client with an object that holds `browser`, `os`, `device` and a few build
+fields. This plugin patches the function that returns it and swaps one field:
 
 | Selection | Reported as |
 |---|---|
@@ -24,10 +24,12 @@ its requests. This plugin patches the function that builds them and reports the 
 | Web | `Chrome` |
 | Mobile | `Android` |
 
-Nothing else in those properties is touched, and the object handed back is a copy.
+Nothing else in that object is touched, and the object handed back is a copy.
 
-Selecting **Desktop client** is all that is needed for Discord to treat this client as the desktop
-app. There is no extra switch, and no request of yours is read, rewritten or replayed.
+Discord uses two readers of that data: the gateway identification (`getSuperProperties`) and the
+HTTP header, which uses a separately cached base64 copy (`getSuperPropertiesBase64`). This plugin
+patches the first one, so the platform Discord is told when the client connects changes, while the
+`X-Super-Properties` header on individual requests keeps the value Discord computed at startup.
 
 ## Why the upstream version fails on Dorion
 
@@ -37,9 +39,11 @@ The upstream file patches a webpack module from the top level of the plugin, at 
 - it looks up one exact export name, so a rename breaks it;
 - it installs no cleanup, so the patch outlives the plugin.
 
-This port starts from `onLoad`, waits up to ten seconds for the function, tells you in the settings
-why it gave up instead of throwing, and removes the patch on unload. It no longer needs the
-`@cumjar/websmack` or `spitroast` packages.
+Dorion makes the first case the normal one: several runtimes share one webpack chunk, and the
+module that holds the function is usually not loaded when a plugin starts. This build searches
+every runtime that answers on that chunk, waits up to ten seconds for the module, never runs a
+module factory to find it, tells you in the settings why it gave up, and removes the patch on
+unload. It no longer needs the `@cumjar/websmack` or `spitroast` packages.
 
 ## Settings
 
@@ -53,6 +57,10 @@ One selector and one status line, which describes the state the plugin actually 
 The line is marked in warning colour when the build refused the patch, so a silent failure cannot
 be mistaken for success. The selector updates the moment you pick a value; no reload needed.
 
+`window.PlatformSpoof.status()` in the console returns the same information, plus the `browser`
+value the patched function currently returns. It describes local state only: it cannot prove what
+another client sees.
+
 ## Limits
 
 - Only the reported platform changes. A real desktop client also exposes APIs this build does not
@@ -61,6 +69,8 @@ be mistaken for success. The selector updates the moment you pick a value; no re
   check again; the plugin cannot rewrite a session that was already identified.
 - The settings line describes local state. It is not proof that another client sees the spoofed
   platform.
+- The HTTP header keeps its cached copy (see above), so a request captured in the Network tab can
+  still show the original browser after the gateway identity changed.
 - This plugin changes a label, not capabilities: game detection, a real stream and a real viewer
   are still out of reach.
 

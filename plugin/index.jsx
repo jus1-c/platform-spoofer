@@ -53,7 +53,11 @@ const spoofer = createSpoofer({
 });
 
 function statusText(current, type) {
-    if (current.state === "active") return `Discord is told this is a ${type} client.`;
+    if (current.state === "active") {
+        // Show what the patched function returns, not what the plugin intended to return.
+        const browser = spoofer.getBrowser() ?? "unknown";
+        return `Patch installed: this client identifies as ${type} (browser: ${browser}).`;
+    }
     if (current.state === "unsupported") return `Cannot spoof on this Discord build: ${current.reason}.`;
     if (current.state === "stopped") return "Spoofing is off.";
     if (current.state === "waiting") return `Waiting for Discord to finish loading (${current.reason ?? "starting"}).`;
@@ -68,7 +72,13 @@ export function onLoad() {
         desktop: "Discord Client",
         web: "Chrome",
         mobile: "Android",
-        setSpoof: type => { store.clientType = normalizeClientType(type); setClientType(store.clientType); }
+        setSpoof: type => { store.clientType = normalizeClientType(type); setClientType(store.clientType); },
+        // A debugging view of local state. It does not prove what another client sees.
+        status: () => ({
+            ...spoofer.getStatus(),
+            clientType: normalizeClientType(store.clientType),
+            browser: spoofer.getBrowser()
+        })
     };
     void spoofer.start();
 }
@@ -105,7 +115,7 @@ export function settings() {
             </div>
             <p class="pspoof-note">
                 Only the reported platform changes: game detection, a real stream and a real viewer
-                cannot be spoofed.
+                cannot be spoofed. Discord applies the patch to connections made after it loads.
             </p>
         </div>
     );
